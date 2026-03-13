@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Cricket Matches</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2><i class="fas fa-cricket"></i> Cricket Matches</h2>
+    </div>
+    <div class="sidebar-content">
+      <div class="search-box">
+        <input type="text" placeholder="Search matches..." id="searchInput">
+        <button><i class="fas fa-search"></i></button>
+      </div>
+      <div id="match-list" class="match-list">
+        <!-- Matches will be populated here -->
+      </div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="container">
+      <div class="header">
+        <button class="sidebar-toggle"><i class="fas fa-bars"></i></button>
+        <h1>Live Cricket Matches</h1>
+      </div>
+      <div id="matches"></div>
+    </div>
+  </div>
+
+  <script>
+    // Global variables
+    let allMatchData = [];
+    let currentMatchIndex = 0;
+
+    // DOM elements
+    const sidebar = document.querySelector('.sidebar');
+    const sidebarToggle = document.querySelector('.sidebar-toggle');
+    const matchList = document.getElementById('match-list');
+    const searchInput = document.getElementById('searchInput');
+    const matchesContainer = document.getElementById('matches');
+
+    // Toggle sidebar
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('collapsed');
+      document.querySelector('.main-content').classList.toggle('expanded');
+    });
+
+    // Search functionality
+    searchInput.addEventListener('input', (e) => {
+      const searchTerm = e.target.value.toLowerCase();
+      const matchItems = document.querySelectorAll('.match-item');
+      
+      matchItems.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+          item.style.display = 'flex';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    });
+
+    async function fetchAllMatchData() {
+      try {
+        const response = await fetch(`/api/matches`);
+        allMatchData = await response.json();
+
+        // Sort by date (newest first)
+        allMatchData.sort((a, b) => {
+          const dateA = new Date(a.info.dates[0]);
+          const dateB = new Date(b.info.dates[0]);
+          return dateB - dateA;
+        });
+
+        // Populate sidebar
+        populateMatchList();
+
+        // Load first match by default
+        if (allMatchData.length > 0) {
+          loadMatchDetails(0);
+        }
+
+      } catch (error) {
+        console.error('Error fetching match data:', error);
+        matchesContainer.innerHTML = `
+          <div class="error-message">
+            <i class="fas fa-exclamation-triangle"></i>
+            <p>Failed to load match data. Please try again later.</p>
+          </div>
+        `;
+      }
+    }
+
+    function populateMatchList() {
+      matchList.innerHTML = '';
+      
+      allMatchData.forEach((match, index) => {
+        const matchDate = match.info.dates ? match.info.dates[0] : 'Unknown Date';
+        const matchDateFormatted = new Date(matchDate).toLocaleDateString();
+        const teams = match.info.teams ? match.info.teams.join(' vs ') : 'Teams not available';
+        
+        const matchItem = document.createElement('div');
+        matchItem.className = `match-item ${index === 0 ? 'active' : ''}`;
+        matchItem.innerHTML = `
+          <div class="match-teams">${teams}</div>
+          <div class="match-date">${matchDateFormatted}</div>
+          ${match.info.outcome?.winner ? `<div class="match-result">${match.info.outcome.winner} won</div>` : ''}
+        `;
+        
+        matchItem.addEventListener('click', () => {
+          // Remove active class from all items
+          document.querySelectorAll('.match-item').forEach(item => {
+            item.classList.remove('active');
+          });
+          
+          // Add active class to clicked item
+          matchItem.classList.add('active');
+          
+          // Load match details
+          loadMatchDetails(index);
+        });
+        
+        matchList.appendChild(matchItem);
+      });
+    }
+
+    function loadMatchDetails(index) {
+      currentMatchIndex = index;
+      const data = allMatchData[index];
+      const matchDate = data.info.dates ? data.info.dates[0] : 'Unknown Date';
+      const matchDateFormatted = new Date(matchDate).toLocaleDateString();
+
+      matchesContainer.innerHTML = '';
+      
+      const matchSection = document.createElement('div');
+      matchSection.classList.add('section', 'active-match');
+      matchSection.style.animation = "fadeIn 1.5s ease forwards";
+      matchSection.innerHTML = ` 
+        <div class="match-header">
+          <h2>${data.info.event?.name || 'Match'} (Match ${data.info.event?.match_number || ''})</h2>
+          <div class="match-date-badge">${matchDateFormatted}</div>
+        </div>
+        <div id="match-info" class="match-info"></div>
+        <div id="match-innings"></div>
+        <div class="charts-container">
+          <canvas id="match-chart" width="400" height="200"></canvas>
+          <div id="match-top-performers" class="top-performers"></div>
+        </div>
+      `;
+      matchesContainer.appendChild(matchSection);
+
+      const infoDiv = document.getElementById('match-info');
+      infoDiv.innerHTML = `
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Venue:</span>
+            <span class="info-value">${data.info.venue || 'Not Available'}, ${data.info.city || 'Unknown'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Match Type:</span>
+            <span class="info-value">${data.info.match_type || 'Not Available'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Toss:</span>
+            <span class="info-value">${data.info.toss ? `${data.info.toss.winner} won and chose to ${data.info.toss.decision}` : 'Not Available'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Result:</span>
+            <span class="info-value highlight">
+              ${data.info.outcome?.winner || 'Match in progress'}
+              ${data.info.outcome?.by?.runs ? `won by ${data.info.outcome.by.runs} runs` : ''}
+              ${data.info.outcome?.by?.wickets ? `won by ${data.info.outcome.by.wickets} wickets` : ''}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Player of the Match:</span>
+            <span class="info-value">${data.info.player_of_match ? data.info.player_of_match.join(', ') : 'Not Available'}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Officials:</span>
+            <span class="info-value">${data.info.officials?.umpires ? data.info.officials.umpires.join(', ') : 'Not Available'}</span>
+          </div>
+        </div>
+      `;
+
+      const inningsDiv = document.getElementById('match-innings');
+      let teamScores = {};
+      const playersStats = {};
+
+      data.innings?.forEach((inning, inningIndex) => {
+        const inningAccordion = createAccordion(`Inning ${inningIndex + 1}: ${inning.team}`, inningIndex === 0);
+
+        inning.overs?.forEach(over => {
+          const overAccordion = createAccordion(`Over ${over.over}`, false);
+
+          over.deliveries?.forEach((delivery, ballIndex) => {
+            const deliveryDiv = document.createElement('div');
+            deliveryDiv.classList.add('delivery');
+            
+            // Add wicket class if there was a wicket
+            if (delivery.wickets && delivery.wickets.length > 0) {
+              deliveryDiv.classList.add('wicket-ball');
+            }
+            
+            deliveryDiv.innerHTML = `
+              <div class="delivery-header">
+                <span class="ball-number">${over.over}.${ballIndex + 1}</span>
+                <span class="bowler-vs-batter">${delivery.bowler} to ${delivery.batter}</span>
+              </div>
+              <div class="delivery-details">
+                <span class="runs-scored">Runs: ${delivery.runs.total}</span>
+                <span class="extra-info">${delivery.runs.extras ? `(Extras: ${delivery.runs.extras})` : ''}</span>
+                ${delivery.wickets && delivery.wickets.length > 0 ? 
+                  `<span class="wicket-info"><i class="fas fa-times-circle"></i> Wicket: ${delivery.wickets[0].kind}</span>` : ''}
+              </div>
+            `;
+            overAccordion.querySelector('.accordion-content').appendChild(deliveryDiv);
+
+            // Update team scores
+            if (!teamScores[inning.team]) {
+              teamScores[inning.team] = 0;
+            }
+            teamScores[inning.team] += delivery.runs.total;
+
+            // Update player stats
+            if (!playersStats[delivery.batter]) {
+              playersStats[delivery.batter] = { runs: 0, wickets: 0, balls: 0 };
+            }
+            playersStats[delivery.batter].runs += delivery.runs.batter;
+            playersStats[delivery.batter].balls += 1;
+
+            if (delivery.wickets && delivery.wickets.length > 0) {
+              if (!playersStats[delivery.bowler]) {
+                playersStats[delivery.bowler] = { runs: 0, wickets: 0, balls: 0 };
+              }
+              playersStats[delivery.bowler].wickets += delivery.wickets.length;
+            }
+          });
+
+          inningAccordion.querySelector('.accordion-content').appendChild(overAccordion);
+        });
+
+        inningsDiv.appendChild(inningAccordion);
+      });
+
+      createMatchChart(teamScores);
+
+      const topPerformersDiv = document.getElementById('match-top-performers');
+      let topBatter = { name: '', runs: 0, balls: 0 };
+      let topBowler = { name: '', wickets: 0, runsConceded: 0 };
+      let allRounder = { name: '', runs: 0, wickets: 0 };
+
+      Object.entries(playersStats).forEach(([player, stats]) => {
+        // Find top batter (by runs)
+        if (stats.runs > topBatter.runs) {
+          topBatter = { name: player, runs: stats.runs, balls: stats.balls };
+        }
+        
+        // Find top bowler (by wickets)
+        if (stats.wickets > topBowler.wickets) {
+          topBowler = { name: player, wickets: stats.wickets, runsConceded: stats.runs };
+        }
+        
+        // Find best all-rounder (combination of runs and wickets)
+        const allRounderScore = stats.runs + (stats.wickets * 20); // Weight wickets more
+        if (allRounderScore > (allRounder.runs + (allRounder.wickets * 20))) {
+          allRounder = { name: player, runs: stats.runs, wickets: stats.wickets };
+        }
+      });
+
+      // Calculate strike rate for top batter
+      const batterStrikeRate = topBatter.balls > 0 ? 
+        ((topBatter.runs / topBatter.balls) * 100).toFixed(2) : 'N/A';
+      
+      // Calculate economy rate for top bowler
+      const bowlerEconomy = topBowler.runsConceded > 0 ? 
+        (topBowler.runsConceded / (topBowler.wickets || 1)).toFixed(2) : 'N/A';
+
+      topPerformersDiv.innerHTML = `
+        <h4><i class="fas fa-trophy"></i> Top Performers</h4>
+        <div class="performers-grid">
+          <div class="performer-card batter">
+            <div class="performer-header">
+              <i class="fas fa-baseball-bat-ball"></i>
+              <h5>Top Batter</h5>
+            </div>
+            <div class="performer-details">
+              <span class="performer-name">${topBatter.name}</span>
+              <div class="performer-stats">
+                <span>${topBatter.runs} runs</span>
+                <span>SR: ${batterStrikeRate}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="performer-card bowler">
+            <div class="performer-header">
+              <i class="fas fa-baseball"></i>
+              <h5>Top Bowler</h5>
+            </div>
+            <div class="performer-details">
+              <span class="performer-name">${topBowler.name}</span>
+              <div class="performer-stats">
+                <span>${topBowler.wickets} wickets</span>
+                <span>ER: ${bowlerEconomy}</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="performer-card all-rounder">
+            <div class="performer-header">
+              <i class="fas fa-star"></i>
+              <h5>Best All-Rounder</h5>
+            </div>
+            <div class="performer-details">
+              <span class="performer-name">${allRounder.name}</span>
+              <div class="performer-stats">
+                <span>${allRounder.runs} runs</span>
+                <span>${allRounder.wickets} wickets</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function createAccordion(title, isOpen = false) {
+      const accordion = document.createElement('div');
+      accordion.classList.add('accordion');
+
+      const header = document.createElement('div');
+      header.classList.add('accordion-header');
+      header.innerHTML = `
+        <span>${title}</span>
+        <span class="arrow">${isOpen ? '▼' : '▶'}</span>
+      `;
+
+      const content = document.createElement('div');
+      content.classList.add('accordion-content');
+      if (isOpen) {
+        content.style.maxHeight = '1000px';
+      }
+
+      accordion.appendChild(header);
+      accordion.appendChild(content);
+
+      header.addEventListener('click', () => {
+        const isOpen = content.style.maxHeight && content.style.maxHeight !== '0px';
+        if (isOpen) {
+          content.style.maxHeight = '0px';
+          header.querySelector('.arrow').textContent = '▶';
+        } else {
+          content.style.maxHeight = content.scrollHeight + 'px';
+          header.querySelector('.arrow').textContent = '▼';
+        }
+      });
+
+      return accordion;
+    }
+
+    function createMatchChart(teamScores) {
+      const ctx = document.getElementById('match-chart').getContext('2d');
+      
+      // Destroy previous chart if it exists
+      if (window.matchChart) {
+        window.matchChart.destroy();
+      }
+      
+      window.matchChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: Object.keys(teamScores),
+          datasets: [{
+            label: 'Runs scored',
+            data: Object.values(teamScores),
+            backgroundColor: [
+              'rgba(54, 162, 235, 0.7)',
+              'rgba(255, 99, 132, 0.7)'
+            ],
+            borderColor: [
+              'rgba(54, 162, 235, 1)',
+              'rgba(255, 99, 132, 1)'
+            ],
+            borderWidth: 2,
+            borderRadius: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              titleFont: {
+                family: 'Poppins',
+                size: 14
+              },
+              bodyFont: {
+                family: 'Poppins',
+                size: 12
+              },
+              padding: 12,
+              cornerRadius: 8
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(0, 0, 0, 0.05)'
+              },
+              ticks: {
+                font: {
+                  family: 'Poppins'
+                }
+              }
+            },
+            x: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                font: {
+                  family: 'Poppins',
+                  weight: 'bold'
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Start fetching match data when page loads
+    document.addEventListener('DOMContentLoaded', fetchAllMatchData);
+  </script>
+</body>
+</html>
